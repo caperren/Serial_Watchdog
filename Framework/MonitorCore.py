@@ -18,8 +18,9 @@ import serial.tools.list_ports as list_ports
 # Monitor Class Definition
 #####################################
 class Monitor(QtCore.QThread):
-
-    update_other_gui_elements = QtCore.pyqtSignal(str, str)
+    setup_tray__signal = QtCore.pyqtSignal()
+    update_tray__signal = QtCore.pyqtSignal()
+    show_message__signal = QtCore.pyqtSignal(str, str)
 
     def __init__(self):
         super(Monitor, self).__init__()
@@ -39,9 +40,6 @@ class Monitor(QtCore.QThread):
         self.num_usb_serial_devices = 0
         self.num_usb_serial_devices_prev = 0
 
-        # ########## Setup tray icon ##########
-        self.setup_tray_icon()
-
         # ########## Get Initial Ports ##########
         self.get_usb_serial_devices()
         self.ports_prev = self.ports
@@ -49,6 +47,9 @@ class Monitor(QtCore.QThread):
 
         # ########## Make signal/slot connections ##########
         self.__connect_signals_to_slots()
+
+        # ########## Setup tray icon ##########
+        self.setup_tray__signal.emit()
 
         # ########## Start Thread ##########
         self.start()
@@ -64,13 +65,14 @@ class Monitor(QtCore.QThread):
 
     # noinspection PyUnresolvedReferences
     def __connect_signals_to_slots(self):
-        pass
+        self.setup_tray__signal.connect(self.setup_tray_icon)
+        self.update_tray__signal.connect(self.list_tray_menu_items)
+        self.show_message__signal.connect(self.show_message)
 
     def setup_tray_icon(self):
         self.system_tray_icon.setContextMenu(self.tray_menu)
         self.system_tray_icon.show()
-        self.system_tray_icon.showMessage("Serial Watchdog", "Application started.\nSerial updates will be " +
-                                          "shown here.", QtWidgets.QSystemTrayIcon.Information, 5000)
+        self.show_message__signal.emit("Serial Watchdog", "Application started.\nSerial updates will be shown here.")
 
     # noinspection PyUnresolvedReferences
     def watch_and_update_serial_devices(self):
@@ -89,15 +91,13 @@ class Monitor(QtCore.QThread):
 
             message = new_port["port_num"] + " : " + new_port["description"]
 
-            self.system_tray_icon.showMessage("New Serial Device Detected", message,
-                                              QtWidgets.QSystemTrayIcon.Information, 1500)
+            self.show_message__signal.emit("New Serial Device Detected", message)
 
             self.only_update_tray_list = True
-
             self.update_needed = False
 
         if self.only_update_tray_list:
-            self.list_tray_menu_items()
+            self.update_tray__signal.emit()
             self.only_update_tray_list = False
 
         # Set the previous number of devices to the current number, so the update only happens when things change
@@ -112,17 +112,20 @@ class Monitor(QtCore.QThread):
 
         self.ports = []
 
-        for port_num, description, address in all_ports:
-            if 'USB' in description:
-                self.num_usb_serial_devices += 1
-                self.ports.append({"port_num": port_num, "description": description, "address": address})
+        for com_ports, description, address in all_ports:
+            if 'USB' in address:
+                if isinstance(com_ports, str):
+                    com_ports = [com_ports]
+
+                for port in com_ports:
+                    self.num_usb_serial_devices += 1
+                    self.ports.append({"port_num": port, "description": description, "address": address})
 
     def port_difference(self, new_ports, old_ports):
         if self.num_usb_serial_devices == 1:
             return new_ports[0]
 
         for port_new in new_ports:
-            # print(port_new)
             port_found = False
             for port_old in old_ports:
                 if port_new["port_num"] == port_old["port_num"]:
@@ -144,6 +147,10 @@ class Monitor(QtCore.QThread):
         self.tray_menu.addSeparator()
         self.tray_menu.addAction("Exit")
         self.tray_menu.triggered.connect(self.on_tray_exit_triggered__slot)
+
+    def show_message(self, title, message):
+        self.system_tray_icon.showMessage(title, message,
+                                          QtWidgets.QSystemTrayIcon.Information, 1500)
 
     def on_tray_exit_triggered__slot(self, event):
 
